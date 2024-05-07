@@ -1,0 +1,13 @@
+tables
+influxdb-client
+h5py
+numpy
+scipy
+matplotlib
+joblib
+pandas
+seaborn
+PyQt5
+zmq
+psutil
+avro-python3

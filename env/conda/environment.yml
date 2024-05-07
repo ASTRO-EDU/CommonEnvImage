@@ -1,0 +1,8 @@
+name: gammasky
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - root=6.26
+  - root_base=6.26
+

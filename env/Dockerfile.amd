@@ -1,0 +1,67 @@
+FROM oraclelinux:8 AS oracle8
+
+# ---------------------------------- Installing dependencies as root ---------------------------------- 
+RUN dnf install -y epel-release git cmake3 gcc-c++ gcc binutils \
+compat-openssl10 libX11-devel libXpm-devel libXft-devel libXext-devel \ 
+gsl-devel openssl-devel wget bzip2-devel libffi-devel xz-devel sqlite-devel \
+ncurses ncurses-devel make xz libzstd libzstd-devel which rsync \
+nmap-ncat chrony
+
+RUN dnf install -y oracle-epel-release-el8
+RUN dnf config-manager --enable ol8_codeready_builder
+RUN dnf install -y hdf5 hdf5-devel
+
+
+# ---------------------------------- Create user ---------------------------------- 
+RUN useradd gamma
+USER gamma
+WORKDIR /home/gamma
+RUN mkdir -p /home/gamma/dependencies
+
+SHELL ["/bin/bash", "--login", "-c"]
+
+USER root 
+
+#AMD
+#COPY ./Anaconda3-2023.07-2-Linux-x86_64.sh .
+RUN wget https://repo.anaconda.com/archive/Anaconda3-2023.07-2-Linux-x86_64.sh 
+RUN chmod +x Anaconda3-2023.07-2-Linux-x86_64.sh 
+RUN ./Anaconda3-2023.07-2-Linux-x86_64.sh -b -p /opt/conda 
+RUN rm Anaconda3-2023.07-2-Linux-x86_64.sh
+
+RUN mkdir -p /home/gamma/gamma-env 
+COPY conda/environment.yml /home/gamma/gamma-env/
+COPY venv/requirements.amd.txt /home/gamma/gamma-env/
+
+USER gamma
+
+#gammasky env
+RUN export PATH=$PATH:/opt/conda/bin && conda config --append channels conda-forge && conda config --set channel_priority strict &&  conda env create -n gammasky -f /home/gamma/gamma-env/environment.yml
+
+RUN export PATH=$PATH:/opt/conda/bin && source activate gammasky && cd /home/gamma/gamma-env/ && pip3 install -r requirements.amd.txt && conda deactivate
+
+RUN export PATH=$PATH:/opt/conda/bin && pip install --upgrade pip
+
+#gammapy
+RUN export PATH=$PATH:/opt/conda/bin && python -m venv gammapy && source ./gammapy/bin/activate && pip install gammapy ipython jupyter
+
+
+
+USER root
+RUN  mkdir /shared_dir
+RUN chown -R gamma:gamma /shared_dir
+RUN  mkdir /data01
+RUN chown -R gamma:gamma /data01
+RUN  mkdir /data02
+RUN chown -R gamma:gamma /data02
+
+COPY ./gammasky.sh /home/gamma/gammasky.sh
+RUN chmod +x /home/gamma/gammasky.sh
+
+COPY ./gammapy.sh /home/gamma/gammapy.sh
+RUN chmod +x /home/gamma/gammapy.sh
+
+USER gamma
+RUN mkdir /home/gamma/workspace
+ENV PATH="/opt/conda/bin:$PATH"
+#ENTRYPOINT ["bash", "/home/gamma/entrypoint.sh"]
