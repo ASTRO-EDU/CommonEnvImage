@@ -31,6 +31,7 @@ RUN rm Anaconda3-2023.07-2-Linux-x86_64.sh
 
 RUN mkdir -p /home/gamma/gamma-env 
 COPY conda/environment.yml /home/gamma/gamma-env/
+COPY conda/deep_requirement.yaml /home/gamma/gamma-env/
 COPY venv/requirements.amd.txt /home/gamma/gamma-env/
 
 USER gamma
@@ -44,6 +45,10 @@ RUN export PATH=$PATH:/opt/conda/bin && pip install --upgrade pip
 
 #gammapy
 RUN export PATH=$PATH:/opt/conda/bin && python -m venv gammapy && source ./gammapy/bin/activate && pip install gammapy ipython jupyter
+
+#deep learning env
+
+RUN export PATH=$PATH:/opt/conda/bin && conda env create -n deeplearning -f /home/gamma/gamma-env/deep_requirement.yaml
 
 
 
