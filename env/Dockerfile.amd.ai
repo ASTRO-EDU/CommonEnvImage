@@ -1,15 +1,9 @@
-FROM oraclelinux:8 AS oracle8
+FROM tensorflow/tensorflow:2.11.0-gpu AS tensorflow
 
 # ---------------------------------- Installing dependencies as root ---------------------------------- 
-RUN dnf install -y epel-release git cmake3 gcc-c++ gcc binutils \
-compat-openssl10 libX11-devel libXpm-devel libXft-devel libXext-devel \ 
-gsl-devel openssl-devel wget bzip2-devel libffi-devel xz-devel sqlite-devel \
-ncurses ncurses-devel make xz libzstd libzstd-devel which rsync \
-nmap-ncat chrony
+RUN apt-get update && apt-get install -y git cmake build-essential wget make rsync python3.8-venv
 
-RUN dnf install -y oracle-epel-release-el8
-RUN dnf config-manager --enable ol8_codeready_builder
-RUN dnf install -y hdf5 hdf5-devel
+RUN apt-get update && apt-get install -y libhdf5-dev && rm -rf /var/lib/apt/lists/* 
 
 
 # ---------------------------------- Create user ---------------------------------- 
@@ -31,19 +25,28 @@ RUN rm Anaconda3-2023.07-2-Linux-x86_64.sh
 
 RUN mkdir -p /home/gamma/gamma-env 
 COPY conda/environment.yml /home/gamma/gamma-env/
+COPY conda/deep_requirement.yaml /home/gamma/gamma-env/
 COPY venv/requirements.amd.txt /home/gamma/gamma-env/
 
 USER gamma
 
 #gammasky env
-RUN export PATH=$PATH:/opt/conda/bin && conda config --append channels conda-forge && conda config --set channel_priority strict &&  conda env create -n gammasky -f /home/gamma/gamma-env/environment.yml
+#RUN export PATH=$PATH:/opt/conda/bin && conda config --append channels conda-forge && conda config --set channel_priority strict &&  conda env create -n gammasky -f /home/gamma/gamma-env/environment.yml
 
-RUN export PATH=$PATH:/opt/conda/bin && source activate gammasky && cd /home/gamma/gamma-env/ && pip3 install -r requirements.amd.txt && conda deactivate
+#RUN export PATH=$PATH:/opt/conda/bin && source activate gammasky && cd /home/gamma/gamma-env/ && pip3 install -r requirements.amd.txt && conda deactivate
 
-RUN export PATH=$PATH:/opt/conda/bin && pip install --upgrade pip
+#RUN export PATH=$PATH:/opt/conda/bin && pip install --upgrade pip
 
 #gammapy
-RUN export PATH=$PATH:/opt/conda/bin && python -m venv gammapy && source ./gammapy/bin/activate && pip install gammapy ipython jupyter
+#RUN export PATH=$PATH:/opt/conda/bin && python -m venv gammapy && source ./gammapy/bin/activate && pip install gammapy ipython jupyter
+
+#deep learning env
+
+RUN export PATH=$PATH:/opt/conda/bin && conda create -n deeplearning python=3.10
+#-f /home/gamma/gamma-env/deep_requirement.yaml
+
+RUN export PATH=$PATH:/opt/conda/bin && source activate deeplearning && pip install tensorflow==2.11.0 matplotlib-3.9.0 astropy-6.1.0 scipy-1.13.1 pandas-2.2.2 tqdm-4.66.4 && pip install ipykernel && python -m ipykernel install --user --name=deeplearning && source deactivate
+
 
 USER root
 RUN  mkdir /shared_dir
