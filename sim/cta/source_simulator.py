@@ -21,16 +21,14 @@ from astropy.table import Table
 from astropy.time import Time
 from matplotlib import use
 from pathlib import Path
-from regions import CircleSkyRegion, PointSkyRegion
+from regions import CircleSkyRegion
 
 from gammapy.data import Observation, observatory_locations, FixedPointingInfo, PointingMode
 from gammapy.datasets import MapDataset, MapDatasetEventSampler
-from gammapy.extern import xmltodict
 from gammapy.irf import load_irf_dict_from_file
 from gammapy.makers import MapDatasetMaker
 from gammapy.maps import MapAxis, RegionNDMap, WcsGeom
 from gammapy.modeling.models import (
-    ConstantSpectralModel,
     FoVBackgroundModel,
     LightCurveTemplateTemporalModel,
     PointSpatialModel,
@@ -40,6 +38,7 @@ from gammapy.modeling.models import (
     SkyModel,
     Models
 )
+from gammapy.stats import WStatCountsStatistic
 from gammapy.utils.time import time_ref_to_dict
 
 
@@ -58,13 +57,13 @@ use("Agg")
 
 ###########
 
-def make_obs(obsid, pointing, irf, time_ref, location="cta_south", livetime=1200*u.s):
-    # TODO: separate observation time ref and start to express times in UNIX
+def make_obs(obsid, pointing, irf, time_start, time_ref, location="cta_north", livetime=1200*u.s):
     location = observatory_locations[location]
     pointing = FixedPointingInfo(mode=PointingMode.POINTING, fixed_icrs=pointing)
     observation = Observation.create(
         obs_id=obsid,
         pointing=pointing,
+        tstart=time_start,
         livetime=livetime,
         irfs=irf,
         location=location,
@@ -103,15 +102,17 @@ def make_dataset(pointing, observation,
 
     return dataset
 
-def make_default_model(time_ref, livetime, timedelay, source_coordinates, i, output_directory,
+def make_default_model(time_start, time_ref, livetime, timedelay, source_coordinates, i, output_directory,
                        amplitude="3e-10 cm-2 s-1 TeV-1", #"1e-12 cm-2 s-1 TeV-1",
                        index="2.25"
                        ):
     """
     Make a default SkyModel.
     
-    time_ref : `astropy.time.Time`
+    time_start : `astropy.time.Time`
         Observation start.
+    time_ref : `astropy.time.Time`
+        Data reference time.
     livetime : `astropy.quantity.Quantity`
         Observation duration.
     timedelay : `astropy.quantity.Quantity`
@@ -129,7 +130,7 @@ def make_default_model(time_ref, livetime, timedelay, source_coordinates, i, out
     # ExpDecayTemporalModel = exp((t-tstart)/t0).
     
     # Burst Offset wrt observation start.
-    tstart = time_ref + timedelay
+    tstart = time_start + timedelay
     
     # Decay Timescale t0 randomly chosen between 0 and half the livetime duration.
     t0 = np.random.uniform(0, livetime.value * 0.5) * u.s
@@ -140,9 +141,9 @@ def make_default_model(time_ref, livetime, timedelay, source_coordinates, i, out
     logger.info(f"Normalization Factor: {mult_fact:.3f}")
 
     # Create the time array and define the model
-    time = time_ref + np.linspace(0, livetime.to("s").value, 10000) * u.s
+    time = time_start + np.linspace(0, livetime.to("s").value, 10000) * u.s
     idx = np.where(time >= tstart)
-    expdecay_model = ExpDecayTemporalModel(t_ref=(tstart-time_ref).to("d"), t0=t0)
+    expdecay_model = ExpDecayTemporalModel(t_ref=(tstart-time_start).to("d"), t0=t0)
     # Create the norm array and evaluate the model.
     norm = np.zeros_like(time, float)
     norm[idx] = expdecay_model.evaluate(time[idx], t0, tstart).value * mult_fact
@@ -230,7 +231,7 @@ def save_events(events, dataset, output_directory, index):
 
 
 
-def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel, nsim, outdir, lightcurveflag, lightcurvesteps, timedelay):
+def run_all(irf, time_start, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel, nsim, obsid, seed, outdir, lightcurveflag, lightcurvesteps, timedelay):
     """
     Perform Simulations.
     
@@ -238,8 +239,10 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
     ----------
     irf : str
         Path to the IRF file.
-    time_ref : str
+    time_start : str
         Observation Start time, in ISOT UTC.
+    time_ref : str
+        Data reference time, in ISOT UTC.
     livetime : float
         Observation Live time, in seconds.
     ra, dec : float
@@ -254,6 +257,10 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
         Sky Model simulation. If None, a default is used.
     nsim : int
         Number of Simulations to make.
+    obsid : int
+        Observation ID
+    seed : int
+        Random state seed.
     outdir : str
         Output Directory path.
     lightcurveflag : bool
@@ -270,18 +277,17 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
     logger.info(f"Read IRF from: {irf}")
     irf = load_irf_dict_from_file(irf)
     
-    energy_axis      = MapAxis.from_energy_bounds(emin, emax, nbin=5, per_decade=True)
-    energy_axis_true = MapAxis.from_energy_bounds("0.001 TeV", "250 TeV", nbin=10, per_decade=True, name="energy_true")
+    energy_axis      = MapAxis.from_energy_bounds(emin, emax, nbin=10, per_decade=True)
+    energy_axis_true = MapAxis.from_energy_bounds("0.001 TeV", "250 TeV", nbin=20, per_decade=True, name="energy_true")
     migra_axis = MapAxis.from_bounds(0.5, 2, nbin=150, node_type="edges", name="migra")
     
     pointing = SkyCoord(ra * u.deg, dec * u.deg, frame="icrs", unit="deg")
     
     livetime = livetime * u.s
     timedelay= timedelay* u.s
+    time_start = Time(time_start, format="isot", scale="utc")
     time_ref = Time(time_ref, format="isot", scale="utc")
-    
-    obsid = "0001" #TODO: Do not make hardcoded?
-    
+
     output_directory = Path(outdir).absolute()
     output_directory.mkdir(parents=True, exist_ok=True)
 
@@ -289,7 +295,7 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
     
     # 2 - CREATE OBSERVATION and DATASET objects
     logger.info(f"=====Create observation...")
-    observation = make_obs(obsid=obsid, pointing=pointing, irf=irf, time_ref=time_ref, livetime=livetime)
+    observation = make_obs(obsid=obsid, pointing=pointing, irf=irf, time_start=time_start, time_ref=time_ref, livetime=livetime)
     logger.info(f"Create observation... done!\n")
 
     logger.info(f"=====Create dataset...")
@@ -304,7 +310,7 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
         if skymodel is None:
             logger.info(f"Create the model and assign to the dataset...")
             source_coordinates = SkyCoord((ra+0.4) * u.deg, dec * u.deg, frame="icrs", unit="deg")
-            models = make_default_model(time_ref, livetime, timedelay, source_coordinates, i, output_directory)
+            models = make_default_model(time_start, time_ref, livetime, timedelay, source_coordinates, i, output_directory)
         else:
             logger.info(f"Read models from: {skymodel}")
             models = Models.read(skymodel)
@@ -312,12 +318,13 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
             logger.info(f"Add background: {skymodel}")
             bkg = FoVBackgroundModel(dataset_name="my-dataset")
             models.append(bkg)
+        
         logger.info(models)
         dataset.models = models
         logger.info(f"Create the model and assign to the dataset... done!")
 
-        logger.info(f"Run simulations for pointing {i}... ")
-        sampler = MapDatasetEventSampler(random_state=i)
+        logger.info(f"Run simulations for pointing {i} with random state {seed+i}... ")
+        sampler = MapDatasetEventSampler(random_state=seed+i)
         events = sampler.run(dataset, observation)
 
         logger.info(f"     - Saving events for pointing {obsid}")
@@ -350,15 +357,26 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
                 # Bin ON and OFF light curve
                 lightcurve_on, edges_on = np.histogram(event_times_on, bins=timebins)
                 lightcurve_off,edges_off= np.histogram(event_times_off, bins=timebins) # edges_on==edges_off
+                
+                # Li&Ma over livetime
+                counts_on = np.sum(lightcurve_on)
+                counts_off= np.sum(lightcurve_off)
+                alpha=1.0
+                excess= counts_on-alpha*counts_off
+                wstat = WStatCountsStatistic(counts_on, counts_off, alpha)
+                sigma = wstat.sqrt_ts
+                
                 # Plot
                 fig, ax = plt.subplots(1, figsize=(12,8), constrained_layout=True)
-                ax.stairs(lightcurve_on, edges_on, label="ON")
-                ax.stairs(lightcurve_off, edges_off, label="OFF")
-                ax.set_xlabel('UNIX Time (s)')
+                ax.stairs(lightcurve_on , edges_on -timebins[0], label=f"ON={counts_on}")
+                ax.stairs(lightcurve_off, edges_off-timebins[0], label=f"OFF={counts_off}")
+                APLabel = r"$\alpha$"+f"={alpha:.2f}\nExcess={excess:.1f}\nSignificance = {sigma:.2f} $\sigma$."
+                ax.plot([], [], ' ', label=APLabel)
+                ax.legend(title=f"Livetime={livetime}")
+                ax.set_xlabel('Time - T0 (s)')
                 ax.set_ylabel('Counts')
-                ax.set_title(f"Light Curve Simulation {i}, {step}s.")
+                ax.set_title(f"Light Curve Simulation {i}, {step}s. T0={-timebins[0]} (UNIX)")
                 ax.grid()
-                ax.legend()
                 fig.savefig(output_directory.joinpath(f"lightcurve_simulation_{i}_{step}s.png"))
                 # Save Table
                 edges_min = edges_on[:-1]
@@ -373,7 +391,8 @@ def run_all(irf, time_ref, livetime, ra, dec, width, binsz, emin, emax, skymodel
 
 ######################################
 # Main
-if __name__ == "__main__":
+def main():
+    """Run Simulator"""
     # Time Monitoring
     Imports_Time = time()-START
     logger.info(f"Runtime Imports = {float(Imports_Time):.3f} s.")
@@ -382,7 +401,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog='CTAOSimulator', description='Simulate a Source with CTAO IRFs', epilog="Use -h for help", formatter_class=argparse.RawDescriptionHelpFormatter)
     
     parser.add_argument("--irf"     , type=str  , required=True                , help=f"Path to IRF file.")
-    parser.add_argument("--time_ref", type=str  , default="2024-01-01T00:00:00", help=f"Observation start time, UTC time in ISOT format")
+    parser.add_argument("--time_start", type=str, default="2024-01-01T00:00:00", help=f"Observation start time, UTC time in ISOT format")
+    parser.add_argument("--time_ref", type=str  , default="1970-01-01T00:00:00", help=f"Reference time to express data, UTC time in ISOT format")
     parser.add_argument("--livetime", type=float, default=1200                 , help=f"Livetime simulation (in s)")
     parser.add_argument("--ra"      , type=float, default=83.63                , help=f"FoV center RA  coordinate (in deg)")
     parser.add_argument("--dec"     , type=float, default=22.01                , help=f"FoV center Dec coordinate (in deg)")
@@ -393,6 +413,8 @@ if __name__ == "__main__":
     parser.add_argument("--skymodel", type=str  , required=False               , help=f"Path to a YAML file with model to simulate. If not provided, a default model is assumed.")
     parser.add_argument("--timedelay",type=float, default=100.0                , help=f"With a default model, delay of transient onset wrt observation start (if >0 transient starts after observation, if <0 transient starts before).")
     parser.add_argument("--nsim"    , type=int  , default=1                    , help=f"How many simulations must be performed")
+    parser.add_argument("--obsid"   , type=int  , default=1                    , help=f"Observation ID")
+    parser.add_argument("--seed"    , type=int  , default=None                 , help=f"Random seed for the simulation")
     parser.add_argument("--outdir"  , type=str  , default="./events"           , help=f"Output directory.")
     parser.add_argument("--show_warnings", action="store_true"                 , help=f"If flag is set, show warnings.")
     parser.add_argument("--lightcurve",    action="store_true"                 , help=f"If flag is set, plot lightcurve of first model.")
@@ -404,11 +426,18 @@ if __name__ == "__main__":
         warnings.simplefilter("ignore")
     
     try:
-        run_all(args.irf, args.time_ref, args.livetime, args.ra, args.dec, args.width, args.binsz,
-                args.emin, args.emax, args.skymodel, args.nsim, args.outdir, args.lightcurve, args.lightcurvesteps, args.timedelay)
+        run_all(irf=args.irf, time_start=args.time_start, time_ref=args.time_ref, livetime=args.livetime, ra=args.ra, dec=args.dec,
+                width=args.width, binsz=args.binsz, emin=args.emin, emax=args.emax,
+                skymodel=args.skymodel, nsim=args.nsim, obsid=args.obsid, seed=args.seed, outdir=args.outdir,
+                lightcurveflag=args.lightcurve, lightcurvesteps=args.lightcurvesteps, timedelay=args.timedelay)
     except Exception as e:
         traceback.print_exc()
         exit(1)
     finally:
         # Time Monitoring
         logger.info(f"TOTAL RUNTIME = {float(time()-START):.3f} s.\n")
+
+######################################
+# Main
+if __name__ == "__main__":
+    main()
