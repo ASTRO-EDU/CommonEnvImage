@@ -45,7 +45,7 @@ USER gamma
 RUN export PATH=$PATH:/opt/conda/bin && conda create -n deeplearning python=3.10
 #-f /home/gamma/gamma-env/deep_requirement.yaml
 
-RUN export PATH=$PATH:/opt/conda/bin && source activate deeplearning && pip install tensorflow==2.11.0 matplotlib-3.9.0 astropy-6.1.0 scipy-1.13.1 pandas-2.2.2 tqdm-4.66.4 && pip install ipykernel && python -m ipykernel install --user --name=deeplearning && source deactivate
+RUN export PATH=$PATH:/opt/conda/bin && source activate deeplearning && pip install tensorflow==2.11.0 matplotlib==3.9.0 astropy==6.1.0 scipy==1.13.1 pandas==2.2.2 tqdm==4.66.4 && pip install ipykernel && python -m ipykernel install --user --name=deeplearning && source deactivate
 
 
 USER root
