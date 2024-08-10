@@ -44,7 +44,7 @@ from gammapy.utils.time import time_ref_to_dict
 
 ######################################
 # Logging and Warnings
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(relativeCreated)6d %(process)d/%(thread)s %(name)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(name)s - %(message)s")
 logger = logging.getLogger(__name__)
 warnings.filterwarnings('ignore', category=UserWarning, append=True)
 warnings.simplefilter('ignore', category=AstropyWarning)
@@ -87,7 +87,7 @@ def make_dataset(pointing, observation,
         geom: ~gammapy.maps, geometry of the dataset
     """
     geom = WcsGeom.create(skydir=pointing,
-                          width=(width, width),
+                          width=width,
                           binsz=binsz,
                           frame="icrs",
                           axes=[energy_axis],
@@ -98,7 +98,9 @@ def make_dataset(pointing, observation,
                               name="my-dataset"
                               )
     maker = MapDatasetMaker(selection=["exposure", "background", "psf", "edisp"])
+    logger.info("Run...")
     dataset = maker.run(empty, observation)
+    logger.info("Complete")
 
     return dataset
 
@@ -421,6 +423,8 @@ def main():
     parser.add_argument("--lightcurvesteps", type=float, nargs='+', default=[5,10,50,100]  , help=f"Time Binning of the lightcurves to be produced in s")
 
     args = parser.parse_args()
+    
+    logger.info(args)
         
     if not args.show_warnings:
         warnings.simplefilter("ignore")
