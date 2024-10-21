@@ -1,71 +1,25 @@
-FROM tensorflow/tensorflow:2.11.0-gpu AS tensorflow
+FROM tensorflow/tensorflow:2.17.0-gpu AS tensorflow
 
-# ---------------------------------- Installing dependencies as root ---------------------------------- 
-RUN apt-get update && apt-get install -y git cmake build-essential wget make rsync python3.8-venv
+# Install basic dependencies
+RUN apt-get update && apt-get install -y git cmake build-essential wget make rsync libhdf5-dev && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y libhdf5-dev && rm -rf /var/lib/apt/lists/* 
-
-
-# ---------------------------------- Create user ---------------------------------- 
+# Create user and set up work environment
 RUN useradd gamma
 USER gamma
 WORKDIR /home/gamma
-RUN mkdir -p /home/gamma/dependencies
 
-SHELL ["/bin/bash", "--login", "-c"]
+# Copy requirements file
+COPY requirements.txt /home/gamma/requirements.txt
 
-USER root 
+# Install Python dependencies via pip from the requirements file
+RUN pip install -r /home/gamma/requirements.txt
 
-#AMD
-#COPY ./Anaconda3-2023.07-2-Linux-x86_64.sh .
-RUN wget https://repo.anaconda.com/archive/Anaconda3-2023.07-2-Linux-x86_64.sh 
-RUN chmod +x Anaconda3-2023.07-2-Linux-x86_64.sh 
-RUN ./Anaconda3-2023.07-2-Linux-x86_64.sh -b -p /opt/conda 
-RUN rm Anaconda3-2023.07-2-Linux-x86_64.sh
-
-RUN mkdir -p /home/gamma/gamma-env 
-COPY conda/environment.yml /home/gamma/gamma-env/
-COPY conda/deep_requirement.yaml /home/gamma/gamma-env/
-COPY venv/requirements.amd.txt /home/gamma/gamma-env/
-
-USER gamma
-
-#gammasky env
-#RUN export PATH=$PATH:/opt/conda/bin && conda config --append channels conda-forge && conda config --set channel_priority strict &&  conda env create -n gammasky -f /home/gamma/gamma-env/environment.yml
-
-#RUN export PATH=$PATH:/opt/conda/bin && source activate gammasky && cd /home/gamma/gamma-env/ && pip3 install -r requirements.amd.txt && conda deactivate
-
-#RUN export PATH=$PATH:/opt/conda/bin && pip install --upgrade pip
-
-#gammapy
-#RUN export PATH=$PATH:/opt/conda/bin && python -m venv gammapy && source ./gammapy/bin/activate && pip install gammapy ipython jupyter
-
-#deep learning env
-
-RUN export PATH=$PATH:/opt/conda/bin && conda create -n deeplearning python=3.10
-#-f /home/gamma/gamma-env/deep_requirement.yaml
-
-RUN export PATH=$PATH:/opt/conda/bin && source activate deeplearning && pip install tensorflow==2.11.0 matplotlib==3.9.0 astropy==6.1.0 scipy==1.13.1 pandas==2.2.2 tqdm==4.66.4 && pip install ipykernel && python -m ipykernel install --user --name=deeplearning && source deactivate
-
-
+# Setup directories
 USER root
-RUN  mkdir /shared_dir
-RUN chown -R gamma:gamma /shared_dir
-RUN  mkdir /data01
-RUN chown -R gamma:gamma /data01
-RUN  mkdir /data02
-RUN chown -R gamma:gamma /data02
-
-COPY ./gammasky.sh /home/gamma/gammasky.sh
-RUN chmod +x /home/gamma/gammasky.sh
-
-COPY ./gammapy.sh /home/gamma/gammapy.sh
-RUN chmod +x /home/gamma/gammapy.sh
-
-COPY ./gammapy.sh /home/gamma/gammasky_dl.sh
-RUN chmod +x /home/gamma/gammasky_dl.sh
+RUN mkdir /shared_dir /data01 /data02 && chown -R gamma:gamma /shared_dir /data01 /data02
 
 USER gamma
 RUN mkdir /home/gamma/workspace
-ENV PATH="/opt/conda/bin:$PATH"
-#ENTRYPOINT ["bash", "/home/gamma/entrypoint.sh"]
+
+# Add path to jupyter-lab to the env variable PATH
+ENV PATH="$PATH:/home/gamma/workspace/anaconda3/bin:/home/gamma/.local/bin"
