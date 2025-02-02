@@ -1,0 +1,4 @@
+
+docker build -t gammasky_dl:v0.4 -f Dockerfile.amd.ai . 
+
+./bootstrap.sh gammasky_dl:v0.4 $USER

@@ -1,0 +1,9 @@
+ docker run --gpus all -it -d -v $HOME:/home/gamma/workspace -v /data02/:/data02/ -p 8003:8003 --name gammasky_dl gammasky_dl:v0.4_$USER /bin/bash
+
+ docker exec -it gammasky_dl /bin/bash
+
+ nohup jupyter-lab --ip="*" --port 8003 --no-browser --autoreload --NotebookApp.token='gamma2024#' --notebook-dir=/home/gamma/ --allow-root > jupyterlab_start.log 2>&1 &
+
+---- Run then delete
+
+ docker run --gpus all -it --rm --name gammasky_dl gammasky_dl:v1.0_$USER /bin/bash
